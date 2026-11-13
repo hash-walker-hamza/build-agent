@@ -1,0 +1,19 @@
+#!/bin/sh
+# build-agent <KEY> [--dry-run]   starts a build detached from the terminal and prints its log path.
+# build-agent <KEY> --status | --request-review | --check   run in the foreground.
+set -e
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+PY="${BUILD_AGENT_PYTHON:-$HERE/.venv/bin/python}"
+[ -x "$PY" ] || PY=python3
+TOKEN="${BUILD_AGENT_HOME:-$HOME/.build-agent}/secrets/claude-token"
+[ -r "$TOKEN" ] && CLAUDE_CODE_OAUTH_TOKEN="$(cat "$TOKEN")" && export CLAUDE_CODE_OAUTH_TOKEN
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+case " $* " in
+  *" --status "*|*" --request-review "*|*" --check "*|*" --foreground "*|"  ")
+    exec "$PY" -m buildagent "$@" ;;
+esac
+LOGS="${BUILD_AGENT_HOME:-$HOME/.build-agent}/logs"
+mkdir -p "$LOGS"
+out="$LOGS/$1-$(date +%Y%m%d-%H%M%S).log"
+nohup "$PY" -m buildagent "$@" > "$out" 2>&1 < /dev/null &
+echo "$out"

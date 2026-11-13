@@ -1,0 +1,82 @@
+# build-agent config. Default location: ~/.config/build-agent/config.toml (or set BUILD_AGENT_CONFIG).
+# Relative paths resolve against this file's directory; ~ and $VARS expand.
+
+[agent]
+home = "~/.build-agent"            # state/, runs/, worktrees/, logs/
+model = "claude-opus-5-5"
+author = "Your Name"               # the person whose decisions the brief holds
+key_pattern = '^[A-Z][A-Z0-9]*-\d+$'
+max_rounds = 3                     # gate -> fix rounds before giving up
+run_timeout = 10800                # seconds per model run
+# path = "/usr/local/bin:/usr/bin:/bin"   # PATH for model runs and gate steps; default: inherit
+# setting_sources = "project"             # keep your user-level CLAUDE.md/hooks out of the runs
+
+[brief]
+dir = "~/.build-agent/briefs"      # <KEY>.md per ticket
+decision_headings = ["Decided after kickoff", "Decision", "Decisions"]
+
+# Optional: let plan and build runs read the ticket through a claude.ai connector.
+# [tracker]
+# mcp = ["Atlassian_Rovo__getJiraIssue", "Atlassian_Rovo__searchJiraIssuesUsingJql"]
+# hint = "Read the ticket with getJiraIssue ({key})."
+
+# Connector servers on your claude.ai account. Every one a run doesn't need is denied.
+[tools]
+connector_servers = []             # e.g. ["Atlassian_Rovo", "Gmail", "Google_Drive"]
+local_mcp_servers = []             # e.g. ["claude-in-chrome"]
+# [tools.connector_known]          # per-server tool lists, so a partly-allowed server denies the rest by name
+# Atlassian_Rovo = ["getJiraIssue", "editJiraIssue", "createJiraIssue"]
+
+[github]
+reviewers = []                     # GitHub logins asked to review each PR
+
+# [notify]
+# webhook_file = "~/.build-agent/secrets/chat-webhook"   # file holding a Google Chat or Slack incoming-webhook URL
+
+# [hooks]
+# post_ship = "python3 ~/bin/after-ship.py"   # gets BUILD_KEY and BUILD_PRS (JSON) in its environment
+
+[[repos]]
+name = "api"                       # what the plan and PR placeholders call it (PR:api)
+path = "~/code/api"                # your main checkout; worktrees are made from it
+github = "you/api"
+base = "main"
+short = "API"
+copy_files = [".env", ".env.test"] # gitignored files the tests need in a new worktree
+setup = []                         # e.g. ["uv sync --frozen"] run once per new worktree
+allow = [".venv/bin/python -m pytest:*", ".venv/bin/ruff:*"]   # Bash(...) rules for the build run
+migrations_dir = "migrations"      # commits touching only this dir ship as their own PR; omit if none
+instructions = """
+Tests: `.venv/bin/python -m pytest <file>` from the worktree root, one file at a time.
+Format changed files with `.venv/bin/ruff format <files>`.
+"""
+review_instructions = ""
+
+  [[repos.gate]]
+  name = "tests"
+  run = ".venv/bin/python -m pytest -q $(git diff --name-only $BUILD_BASE...HEAD -- 'tests/*.py' | tr '\\n' ' ')"
+  when_changed = '\.py$'
+  timeout = 3600
+
+  [[repos.gate]]
+  name = "lint"
+  run = ".venv/bin/ruff check $(git diff --name-only --diff-filter=d $BUILD_BASE...HEAD -- '*.py' | tr '\\n' ' ')"
+  when_changed = '\.py$'
+
+  # A Python gate step (copy examples/plugins/commit_keys.py next to this file first):
+  # [[repos.gate]]
+  # name = "commit-keys"
+  # python = "plugins/commit_keys.py"   # relative to this file
+
+[[repos]]
+name = "web"
+path = "~/code/web"
+github = "you/web"
+copy_files = [".env"]
+setup = ["pnpm install --frozen-lockfile --prefer-offline"]
+allow = ["pnpm exec vitest:*", "pnpm exec eslint:*"]
+
+  [[repos.gate]]
+  name = "vitest"
+  run = "pnpm exec vitest run --changed $BUILD_BASE"
+  when_changed = '\.(ts|vue|tsx?)$'
